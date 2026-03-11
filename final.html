@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CalWork Ultimate</title>
+    <style>
+        :root { --primary: #00d2ff; --bg: #000; --card: #121212; --success: #2ecc71; --danger: #ff4b2b; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { font-family: sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; align-items: center; }
+
+        /* الهيدر والترس */
+        .header { width: 100%; padding: 20px; display: flex; justify-content: flex-start; }
+        .settings-btn { font-size: 28px; cursor: pointer; color: #555; z-index: 100; }
+
+        /* الساعة والعداد */
+        .main-display { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; }
+        #clock { font-size: 1.2rem; color: #555; margin-bottom: 10px; }
+        #work-timer { font-size: 4.5rem; color: var(--primary); font-weight: bold; margin: 10px 0; }
+
+        /* الأزرار */
+        .controls { display: flex; gap: 40px; margin-bottom: 60px; }
+        .circle-btn { width: 90px; height: 90px; border-radius: 50%; border: none; color: #fff; font-weight: bold; font-size: 1.2rem; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        #inBtn { background: var(--success); }
+        #outBtn { background: var(--danger); opacity: 0.3; }
+
+        /* القائمة المنبثقة (الترس والتقويم) */
+        .full-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 2000; display: none; flex-direction: column; padding: 25px; overflow-y: auto; }
+        .close-btn { align-self: flex-end; font-size: 30px; padding: 10px; color: var(--danger); }
+        
+        .menu-item { background: var(--card); padding: 20px; border-radius: 15px; margin-bottom: 15px; text-align: center; border: 1px solid #222; }
+        input { width: 100%; padding: 12px; background: #000; border: 1px solid #333; color: #fff; border-radius: 10px; text-align: center; margin-top: 10px; }
+
+        /* التقويم */
+        .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 15px; }
+        .day { background: #1a1a1a; padding: 12px 0; border-radius: 8px; font-size: 0.8rem; border: 1px solid transparent; }
+        .day.has-data { border-color: var(--success); color: var(--success); }
+
+        #toast { position: fixed; bottom: 30px; background: var(--card); border: 1px solid var(--primary); padding: 10px 20px; border-radius: 50px; display: none; z-index: 3000; }
+    </style>
+</head>
+<body onload="initApp()">
+
+    <div class="header">
+        <div class="settings-btn" onclick="openMenu()">⚙️</div>
+    </div>
+
+    <div class="main-display">
+        <div id="clock">00:00:00</div>
+        <div id="work-timer">00:00:00</div>
+        <div class="controls">
+            <button id="inBtn" class="circle-btn" onclick="handleAction('in')">IN</button>
+            <button id="outBtn" class="circle-btn" onclick="handleAction('out')">OUT</button>
+        </div>
+    </div>
+
+    <div id="menuOverlay" class="full-overlay">
+        <div class="close-btn" onclick="closeMenu()">✕</div>
+        
+        <div class="menu-item" onclick="showCalendarUI()">
+            <h3>📅 سجل الحضور والتقويم</h3>
+            <div id="calSection" style="display:none">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin:10px 0">
+                    <button onclick="changeMonth(-1)" style="color:var(--primary); background:none; border:none; font-size:20px"><</button>
+                    <span id="monthTitle">الشهر</span>
+                    <button onclick="changeMonth(1)" style="color:var(--primary); background:none; border:none; font-size:20px">></button>
+                </div>
+                <div class="cal-grid" id="grid"></div>
+                <div id="dayDetail" style="margin-top:15px; font-size:12px; color:#aaa"></div>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <h3>📧 إعدادات البيانات</h3>
+            <input type="email" id="emailInput" placeholder="اكتب إيميلك هنا" onchange="localStorage.setItem('targetEmail', this.value)">
+        </div>
+
+        <div class="menu-item">
+            <h3>🔑 كود التفعيل</h3>
+            <input type="text" id="masterKeyInput" placeholder="2026" onchange="localStorage.setItem('mKey', this.value)">
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        let seconds = 0, timer, currentViewDate = new Date();
+        let logs = JSON.parse(localStorage.getItem('calwork_db')) || {};
+        const scriptURL = "https://script.google.com/macros/s/AKfycbyBms8jZPDMWeTdZCFySH9nnegrHRAX37bXZ4FDxaqCr52AjD5dSkTaOpZXS4tMtkq0/exec";
+
+        function initApp() {
+            setInterval(() => { document.getElementById('clock').innerText = new Date().toLocaleTimeString(); }, 1000);
+            document.getElementById('emailInput').value = localStorage.getItem('targetEmail') || "";
+            
+            if(localStorage.getItem('isWorkingTime')) {
+                let start = new Date(localStorage.getItem('isWorkingTime'));
+                seconds = Math.floor((new Date() - start) / 1000);
+                startUI();
+            }
+        }
+
+        function handleAction(type) {
+            if(type === 'in') {
+                localStorage.setItem('isWorkingTime', new Date());
+                startUI();
+            } else {
+                stopWork();
+            }
+        }
+
+        function startUI() {
+            document.getElementById('inBtn').style.opacity = '0.3';
+            document.getElementById('outBtn').style.opacity = '1';
+            timer = setInterval(() => {
+                seconds++;
+                let h=Math.floor(seconds/3600).toString().padStart(2,'0'),
+                    m=Math.floor((seconds%3600)/60).toString().padStart(2,'0'),
+                    s=(seconds%60).toString().padStart(2,'0');
+                document.getElementById('work-timer').innerText = `${h}:${m}:${s}`;
+            }, 1000);
+        }
+
+        function stopWork() {
+            clearInterval(timer);
+            let start = new Date(localStorage.getItem('isWorkingTime'));
+            let end = new Date();
+            let duration = (seconds / 3600).toFixed(2);
+            
+            const key = `${start.getFullYear()}-${start.getMonth()+1}-${start.getDate()}`;
+            logs[key] = { in: start.toLocaleTimeString(), out: end.toLocaleTimeString(), total: duration };
+            localStorage.setItem('calwork_db', JSON.stringify(logs));
+
+            fetch(scriptURL, { method: "POST", mode: "no-cors", body: JSON.stringify({
+                date: start.toLocaleDateString(), in: start.toLocaleTimeString(),
+                out: end.toLocaleTimeString(), duration: duration, email: localStorage.getItem('targetEmail')
+            })});
+
+            localStorage.removeItem('isWorkingTime');
+            alert("تم الحفظ والإرسال ✅");
+            location.reload();
+        }
+
+        function openMenu() { document.getElementById('menuOverlay').style.display = 'flex'; }
+        function closeMenu() { document.getElementById('menuOverlay').style.display = 'none'; }
+        
+        function showCalendarUI() {
+            const sec = document.getElementById('calSection');
+            sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
+            renderCal();
+        }
+
+        function renderCal() {
+            const grid = document.getElementById('grid'); grid.innerHTML = "";
+            const y = currentViewDate.getFullYear(), m = currentViewDate.getMonth();
+            document.getElementById('monthTitle').innerText = `${m+1} / ${y}`;
+            let last = new Date(y, m+1, 0).getDate();
+            for(let i=1; i<=last; i++) {
+                let d = document.createElement('div'); d.className = 'day'; d.innerText = i;
+                if(logs[`${y}-${m+1}-${i}`]) d.className = 'day has-data';
+                d.onclick = (e) => {
+                    e.stopPropagation();
+                    const log = logs[`${y}-${m+1}-${i}`];
+                    document.getElementById('dayDetail').innerHTML = log ? `حضور: ${log.in}<br>انصراف: ${log.out}<br>ساعات: ${log.total}` : "لا يوجد سجل";
+                };
+                grid.appendChild(d);
+            }
+        }
+
+        function changeMonth(s) { currentViewDate.setMonth(currentViewDate.getMonth() + s); renderCal(); }
+    </script>
+</body>
+</html>
